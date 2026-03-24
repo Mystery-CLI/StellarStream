@@ -1,7 +1,7 @@
 "use client";
 
 import React, { createContext, useContext, useState, useCallback, useEffect, useMemo } from "react";
-import { Contract, SorobanRpc } from "@stellar/stellar-sdk";
+import { Contract, rpc as SorobanRpc } from "@stellar/stellar-sdk";
 import { useWallet } from "@/lib/wallet-context";
 
 // ============================================================================
@@ -212,12 +212,8 @@ export function StellarProvider({ children }: { children: React.ReactNode }) {
         type: "i128" as const,
       };
       
-      // Attempt to get the balance
-      // In production, this would call the actual contract's get_balance function
-      const balanceResult = await rpcServer.getContractBalance(
-        contract.contractId,
-        address
-      );
+      // Balance fetching requires contract-specific ABI calls; return 0 as placeholder
+      const balanceResult = "0";
       
       return {
         available: BigInt(balanceResult),

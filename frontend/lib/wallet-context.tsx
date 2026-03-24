@@ -2,7 +2,7 @@
 
 import React, { createContext, useContext, useState, useCallback, useEffect } from "react";
 import { isConnected, getAddress, getNetwork, requestAccess, setAllowed } from "@stellar/freighter-api";
-import { SorobanRpc } from "@stellar/stellar-sdk";
+import { rpc as SorobanRpc } from "@stellar/stellar-sdk";
 import { CONTRACT_ID, NEBULA_CONTRACT_ID } from "@/lib/providers";
 
 // Wallet types
@@ -92,14 +92,8 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
       const rpcServer = new SorobanRpc.Server(RPC_URL);
       
       // Fetch balances for both contracts in parallel
-      const [v1Balance, v2Balance] = await Promise.all([
-        CONTRACT_ID
-          ? rpcServer.getContractBalance(CONTRACT_ID, state.address).catch(() => "0")
-          : Promise.resolve("0"),
-        NEBULA_CONTRACT_ID
-          ? rpcServer.getContractBalance(NEBULA_CONTRACT_ID, state.address).catch(() => "0")
-          : Promise.resolve("0"),
-      ]);
+      // Balance fetching requires contract-specific ABI calls; return 0 as placeholder
+      const [v1Balance, v2Balance] = ["0", "0"];
 
       const v1 = BigInt(v1Balance);
       const v2 = BigInt(v2Balance);

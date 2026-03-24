@@ -340,7 +340,8 @@ export function NetWorthStreamVisualizer({
               
               {/* Glow effect for Stellar Blue */}
               <filter id="glowBlue" height="300%">
-                <feGaussianMatrix stdDeviation="4" values="0 0 0 0 59  0 0 0 0 130  0 0 0 0 246  0 0 0 0.6 0" />
+                <feGaussianBlur stdDeviation="4" result="blur" />
+                <feColorMatrix type="matrix" values="0 0 0 0 59  0 0 0 0 130  0 0 0 0 246  0 0 0 0.6 0" in="blur" />
                 <feMerge>
                   <feMergeNode />
                   <feMergeNode in="SourceGraphic" />
@@ -349,7 +350,8 @@ export function NetWorthStreamVisualizer({
               
               {/* Glow effect for Cosmic Purple */}
               <filter id="glowPurple" height="300%">
-                <feGaussianMatrix stdDeviation="4" values="0 0 0 0 139  0 0 0 0 92  0 0 0 0 246  0 0 0 0.6 0" />
+                <feGaussianBlur stdDeviation="4" result="blur" />
+                <feColorMatrix type="matrix" values="0 0 0 0 139  0 0 0 0 92  0 0 0 0 246  0 0 0 0.6 0" in="blur" />
                 <feMerge>
                   <feMergeNode />
                   <feMergeNode in="SourceGraphic" />

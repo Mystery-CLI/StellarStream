@@ -10,7 +10,7 @@
  * The signature uses the Soroban V2 create_via_signature pattern.
  */
 
-import { Transaction, Keypair, Signer, xdr } from "@stellar/stellar-sdk";
+import { Transaction, TransactionBuilder, Keypair, Signer, xdr, Networks } from "@stellar/stellar-sdk";
 
 export interface SignatureRequest {
   message: string;
@@ -53,22 +53,9 @@ export function createSignaturePayload(
  * Note: In production, this would use the actual contract XDR structure
  */
 export function payloadToXDR(payload: SignatureRequest): Buffer {
-  // Create a simple transaction envelope for signing
-  // The actual implementation would use proper contract XDR
-  const source = xdr.TransactionEnvelope.envelopeTypeTx();
-  
   // Create a dummy transaction for signature
-  const tx = new Transaction(
-    {
-      source: "GCZBOIAY4HLKAJVNJORXZOZRAY2BJDBZHKPBHZCRAIUR5IIY5YF6VLBC",
-      fee: 100,
-      sequence: "0",
-      operations: [],
-    },
-    "TESTNET"
-  );
-
-  return Buffer.from(tx.toEnvelope().toXDR());
+  const payload_bytes = Buffer.from(JSON.stringify(payload));
+  return payload_bytes;
 }
 
 /**
@@ -81,19 +68,19 @@ export async function signMessage(
 ): Promise<string> {
   try {
     // Import the sign function from freighter
-    const { sign } = await import("@stellar/freighter-api");
+    const { signTransaction } = await import("@stellar/freighter-api");
     
     // Create the XDR transaction for signing
     const txEnvelope = payloadToXDR(payload);
     
     // Sign using Freighter
-    const result = await sign(txEnvelope.toString("base64"), address);
+    const result = await signTransaction(txEnvelope.toString("base64"), { address });
     
     if (result.error) {
       throw new Error(result.error);
     }
     
-    return result.signedTx;
+    return result.signedTxXdr;
   } catch (error) {
     console.error("Failed to sign message:", error);
     throw error;
@@ -149,15 +136,15 @@ export function buildFlashStreamTransaction(
 ): Transaction {
   // In production, this would create the actual Soroban invoke contract transaction
   // For now, we create a placeholder transaction structure
-  const tx = new Transaction(
-    {
-      source: params.sender,
-      fee: 5000, // Higher fee for Soroban transactions
-      sequence: "0",
-      operations: [],
-    },
-    "TESTNET"
-  );
+  const account = {
+    accountId: () => params.sender,
+    sequenceNumber: () => "0",
+    incrementSequenceNumber: () => {},
+  };
+  const tx = new TransactionBuilder(account as any, { // eslint-disable-line @typescript-eslint/no-explicit-any
+    fee: "5000",
+    networkPassphrase: Networks.TESTNET,
+  }).setTimeout(30).build();
 
   return tx;
 }
@@ -168,7 +155,8 @@ export function buildFlashStreamTransaction(
 export async function isSignatureAuthSupported(): Promise<boolean> {
   try {
     const { isConnected } = await import("@stellar/freighter-api");
-    return await isConnected();
+    const result = await isConnected();
+    return result.isConnected;
   } catch {
     return false;
   }
