@@ -9,6 +9,7 @@ import yieldRouter from "./yield.routes.js";
 import snapshotRouter from "./snapshot.routes";
 import governanceRouter from "./governance.routes.js";
 import gasTankRouter from "./gas-tank.routes.js";
+import analyticsRouter from "./analytics.routes.js";
 
 const router = Router();
 
@@ -18,6 +19,7 @@ router.use("/yield", yieldRouter);
 router.use("/snapshots", snapshotRouter);
 router.use("/", governanceRouter);
 router.use("/", gasTankRouter);
+router.use("/analytics", analyticsRouter);
 
 const auditLogService = new AuditLogService();
 
