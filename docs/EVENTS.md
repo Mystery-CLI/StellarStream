@@ -14,7 +14,7 @@ All events follow this convention:
 
 ### 1. `create`
 
-**Emitted when**: A new stream is created (single or batch)
+**Emitted when**: A new stream is created (single creation)
 
 **Topics**:
 - `symbol_short!("create")` - Event type identifier
@@ -29,6 +29,36 @@ env.events().publish((symbol_short!("create"), sender), stream_id);
 ```
 
 **Indexer Query**: Filter by `stream_id` or `sender` address to track stream creation history.
+
+---
+
+### 1.1. `create_v2`
+
+**Emitted when**: A new V2 stream is created (single or as part of batch)
+
+**Topics**:
+- `symbol_short!("create_v2")` - Event type identifier
+- `sender: Address` - The address creating the stream
+
+**Data**:
+- `StreamCreatedV2Event` - Complete stream creation details
+
+**Indexer Query**: Filter by `stream_id` or `sender` address to track V2 stream creation.
+
+---
+
+### 1.2. `batch_create`
+
+**Emitted when**: Multiple streams are created in a single batch transaction
+
+**Topics**:
+- `symbol_short!("batch_create")` - Event type identifier
+- `sender: Address` - The address creating the batch
+
+**Data**:
+- `BatchStreamsCreatedEvent` - Batch creation summary with all stream IDs
+
+**Indexer Query**: Filter by `sender` to track batch operations, or use `stream_ids` for correlation.
 
 ---
 
@@ -106,7 +136,7 @@ All events include `stream_id` in either topics or data, enabling efficient filt
 // Example: Get all events for stream #42
 const events = await indexer.getEvents({
   contractId: STELLAR_STREAM_CONTRACT,
-  topics: [["create", "withdraw", "cancel", "migrate"], "*"],
+  topics: [["create", "create_v2", "withdraw", "cancel", "migrate", "batch_create"], "*"],
   filters: { stream_id: 42 }
 });
 ```

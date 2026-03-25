@@ -89,6 +89,16 @@ pub struct StreamCreatedV2Event {
 
 #[contracttype]
 #[derive(Clone, Debug)]
+pub struct BatchStreamsCreatedEvent {
+    pub stream_ids: Vec<u64>,
+    pub sender: Address,
+    pub total_streams: u32,
+    pub total_amount: i128,
+    pub timestamp: u64,
+}
+
+#[contracttype]
+#[derive(Clone, Debug)]
 pub struct PermitPayload {
     pub contract: Address,
     pub sender_pubkey: soroban_sdk::BytesN<32>,
