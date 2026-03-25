@@ -12,6 +12,7 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   History as HistoryIcon,
+  Shield,
 } from "lucide-react";
 
 type NavItem = {
@@ -39,6 +40,7 @@ export function Sidebar({ onOpenAuditLog }: SidebarProps) {
   const navItems: NavItem[] = [
     { label: "Dashboard", href: "/dashboard", icon: Gauge },
     { label: "My Streams", href: "/dashboard/streams", icon: Waves },
+    { label: "Vaults", href: "/dashboard/vaults", icon: Shield },
     {
       label: "Pending Approvals",
       href: "/dashboard/pending",
