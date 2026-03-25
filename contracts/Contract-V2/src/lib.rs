@@ -181,7 +181,7 @@ impl Contract {
     pub fn get_v2_protocol_health(env: Env) -> types::ProtocolHealthV2 {
         storage::get_health(&env)
     }
-    
+
     // ----------------------------------------------------------------
     // Issue #404 — Bulk TTL Extension
     // ----------------------------------------------------------------

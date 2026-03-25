@@ -462,9 +462,7 @@ fn test_permit_stream_fails_when_paused() {
     let bad_sig = soroban_sdk::BytesN::from_array(&env, &[0u8; 64]);
 
     let result = client.try_create_stream_with_signature(
-        &pubkey, &receiver, &token_id, &1000i128, &0u64, &200u64, &0u64,
-        &9999u64,
-        &bad_sig,
+        &pubkey, &receiver, &token_id, &1000i128, &0u64, &200u64, &0u64, &9999u64, &bad_sig,
     );
     assert!(result.is_err());
 }
