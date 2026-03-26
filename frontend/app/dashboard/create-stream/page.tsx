@@ -4,6 +4,8 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { ShieldAlert } from "lucide-react";
 import { useProtocolStatus } from "@/lib/use-protocol-status";
 import PrivacyShieldToggle from "@/components/privacy-shield-toggle";
+import { TransactionPrioritySelector } from "@/components/transaction-priority-selector";
+import { useTransactionPriority, type PriorityTier } from "@/lib/use-transaction-priority";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface FormData {
@@ -663,10 +665,14 @@ function Step3({
   form,
   onSign,
   signing,
+  priorityTier,
+  onPriorityChange,
 }: {
   form: FormData;
   onSign: () => void;
   signing: boolean;
+  priorityTier: PriorityTier;
+  onPriorityChange: (id: PriorityTier) => void;
 }) {
   const asset = ASSETS.find((a) => a.symbol === form.asset);
   const durationSeconds =
@@ -731,6 +737,11 @@ function Step3({
           Ensure all details are correct before signing.
         </p>
       </div>
+
+      <TransactionPrioritySelector
+        selected={priorityTier}
+        onChange={onPriorityChange}
+      />
 
       <button
         onClick={onSign}
@@ -822,6 +833,9 @@ export default function CreateStreamPage() {
   const [success, setSuccess] = useState(false);
   const [animKey, setAnimKey] = useState(0);
 
+  // ── Transaction priority (#456) ──────────────────────────────────────────────
+  const { tier: priorityTier, setTierId: setPriorityTierId, totalFeeStroops } = useTransactionPriority();
+
   // ── Emergency gate (#426) ────────────────────────────────────────────────────
   const { isEmergency } = useProtocolStatus();
 
@@ -868,6 +882,10 @@ export default function CreateStreamPage() {
 
   const handleSign = async () => {
     setSigning(true);
+    // totalFeeStroops(0) gives the fee with no simulated resource fee.
+    // In production, pass the real simulated resource fee here.
+    const feeStoops = totalFeeStroops(0);
+    console.info(`[CreateStream] Submitting with fee: ${feeStoops} stroops (priority: ${priorityTier.id})`);
     await new Promise((r) => setTimeout(r, 2200));
     setSigning(false);
     setSuccess(true);
@@ -967,7 +985,7 @@ export default function CreateStreamPage() {
 
                   {step === 1 && <Step1 form={form} update={update} />}
                   {step === 2 && <Step2 form={form} update={update} />}
-                  {step === 3 && <Step3 form={form} onSign={handleSign} signing={signing} />}
+                  {step === 3 && <Step3 form={form} onSign={handleSign} signing={signing} priorityTier={priorityTier.id} onPriorityChange={setPriorityTierId} />}
 
                   {step < 3 && (
                     <div className="flex gap-3 mt-8">
