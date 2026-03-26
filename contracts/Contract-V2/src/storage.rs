@@ -34,6 +34,9 @@ struct StoredStreamV2 {
     pub multiplier_bps: i128,
     pub vault_address: Option<Address>,
     pub cycle_duration: u64,
+    pub yield_recipient: u32,
+    pub split_address: Option<Address>,
+    pub split_bps: u32,
 }
 
 // ----------------------------------------------------------------
@@ -278,6 +281,9 @@ pub fn set_stream(env: &Env, stream_id: u64, stream: &StreamV2) {
         multiplier_bps: stream.multiplier_bps,
         vault_address: stream.vault_address.clone(),
         cycle_duration: stream.cycle_duration,
+        yield_recipient: stream.yield_recipient,
+        split_address: stream.split_address.clone(),
+        split_bps: stream.split_bps,
     };
     env.storage().persistent().set(&key, &stored);
     env.storage()
@@ -320,6 +326,9 @@ pub fn get_stream(env: &Env, stream_id: u64) -> Option<StreamV2> {
             cycle_duration: stored.cycle_duration,
             cancellation_type,
             penalty_bps,
+            yield_recipient: stored.yield_recipient,
+            split_address: stored.split_address,
+            split_bps: stored.split_bps,
         }
     })
 }
