@@ -14,6 +14,10 @@ const fmt = (n: number, d = 2) =>
 const LOW_GAS_DAYS = 7;
 const LOW_GAS_XLM = 5;
 
+/** Smart Prompt: suggest a top-up when balance drops below this level */
+const SMART_PROMPT_THRESHOLD_XLM = 10;
+const SMART_PROMPT_DEPOSIT_XLM = 50;
+
 // ─── AmountInput ──────────────────────────────────────────────────────────────
 
 function AmountInput({
@@ -59,6 +63,7 @@ export default function GasManagementTile() {
     const { status, loading, error, pendingOp, deposit, withdraw, refresh } = useGasBuffer();
     const [depositAmt, setDepositAmt] = useState("");
     const [withdrawAmt, setWithdrawAmt] = useState("");
+    const [promptDismissed, setPromptDismissed] = useState(false);
 
     const isLowGas =
         status !== null &&
@@ -177,6 +182,32 @@ export default function GasManagementTile() {
                                     : `Only ${fmt(status?.daysRemaining ?? 0, 1)} days of runway remaining. Deposit XLM to avoid stream interruptions.`}
                             </p>
                         </div>
+                    </div>
+                )}
+
+                {/* ── Smart Prompt: suggest top-up when balance < 10 XLM ── */}
+                {!loading && !promptDismissed && status !== null && status.balanceXlm < SMART_PROMPT_THRESHOLD_XLM && (
+                    <div className="flex items-start gap-2.5 rounded-xl border border-cyan-400/25 bg-cyan-400/[0.05] px-3 py-2.5">
+                        <span className="text-cyan-400 mt-0.5 shrink-0 text-sm">💡</span>
+                        <div className="flex-1 min-w-0">
+                            <p className="font-body text-xs font-semibold text-cyan-300">Smart Suggestion</p>
+                            <p className="font-body text-[11px] text-cyan-300/70 mt-0.5">
+                                Deposit {SMART_PROMPT_DEPOSIT_XLM} XLM to cover your next 5 payroll cycles.
+                            </p>
+                            <button
+                                onClick={() => setDepositAmt(String(SMART_PROMPT_DEPOSIT_XLM))}
+                                className="mt-2 rounded-lg border border-cyan-400/30 bg-cyan-400/10 px-3 py-1 font-body text-[11px] font-bold text-cyan-300 hover:bg-cyan-400/20 transition-colors"
+                            >
+                                Deposit {SMART_PROMPT_DEPOSIT_XLM} XLM →
+                            </button>
+                        </div>
+                        <button
+                            onClick={() => setPromptDismissed(true)}
+                            aria-label="Dismiss suggestion"
+                            className="text-white/20 hover:text-white/50 transition-colors text-xs leading-none mt-0.5 shrink-0"
+                        >
+                            ✕
+                        </button>
                     </div>
                 )}
 
