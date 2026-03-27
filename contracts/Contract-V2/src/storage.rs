@@ -93,6 +93,38 @@ pub enum DataKeyV2 {
     // -- Compliance Oracle (Issue #412) ---------------------------
     /// Address of the compliance oracle contract
     ComplianceOracle, // 15
+    // -- Emergency Mode (Issue #393) ---------------------------------
+    /// When true, create_stream and top_up are blocked; withdraw remains accessible.
+    Emergency, // 15
+
+    // -- Migration Ledger Bit-Map (Issue #399) -----------------------
+    /// Persistent flag per V1 stream ID. Set to true after a successful migration
+    /// to prevent replay attacks (migrating the same V1 stream twice).
+    V1MigratedMap(u64), // 16
+
+    // -- Nebula-DAO Vote-Weight Integration (Issue: Governance) ------
+    /// Address of the DAO governance token contract
+    DaoToken, // 17
+    /// Minimum voting power required to execute admin-only treasury splits
+    VotingThreshold, // 18
+
+    // -- Timelocked Treasury Splits (Issue: Governance Security) -----
+    /// Pending treasury split by ID
+    PendingTreasurySplit(u64), // 19
+    /// Counter for pending treasury split IDs
+    TreasurySplitCount, // 20
+
+    // -- Issue #602 — Protocol Fee Capture for split_multi_asset -----
+    /// Address that collects disbursement fees
+    FeeCollector, // 21
+    /// Token used to pay disbursement fees (e.g. native XLM SAC)
+    FeeToken, // 22
+    /// Fee charged per recipient in split_multi_asset, in the FeeToken's base unit
+    FeePerRecipient, // 23
+
+    // -- Issue #603 — Reentrancy Guard --------------------------------
+    /// Set to true while split_multi_asset is executing; prevents reentrant calls
+    Locked, // 24
 }
 
 /// Global stream counter.
@@ -672,4 +704,65 @@ pub fn set_compliance_oracle(env: &Env, oracle: &Address) {
 /// Return the compliance oracle address, if configured.
 pub fn get_compliance_oracle(env: &Env) -> Option<Address> {
     env.storage().instance().get(&DataKeyV2::ComplianceOracle)
+}
+
+// ----------------------------------------------------------------
+// Issue #602 — Protocol Fee Capture for split_multi_asset
+// ----------------------------------------------------------------
+
+pub fn set_fee_collector(env: &Env, collector: &Address) {
+    env.storage().instance().set(&DataKeyV2::FeeCollector, collector);
+    bump_instance(env);
+}
+
+pub fn get_fee_collector(env: &Env) -> Option<Address> {
+    env.storage().instance().get(&DataKeyV2::FeeCollector)
+}
+
+pub fn set_fee_token(env: &Env, token: &Address) {
+    env.storage().instance().set(&DataKeyV2::FeeToken, token);
+    bump_instance(env);
+}
+
+pub fn get_fee_token(env: &Env) -> Option<Address> {
+    env.storage().instance().get(&DataKeyV2::FeeToken)
+}
+
+/// Fee charged per recipient (in fee_token base units). Default 0 = no fee.
+pub fn set_fee_per_recipient(env: &Env, amount: i128) {
+    env.storage().instance().set(&DataKeyV2::FeePerRecipient, &amount);
+    bump_instance(env);
+}
+
+pub fn get_fee_per_recipient(env: &Env) -> i128 {
+    env.storage()
+        .instance()
+        .get(&DataKeyV2::FeePerRecipient)
+        .unwrap_or(0)
+}
+
+// ----------------------------------------------------------------
+// Issue #603 — Reentrancy Guard
+// ----------------------------------------------------------------
+
+/// Returns true if the contract is currently inside a multi-transfer execution.
+pub fn is_locked(env: &Env) -> bool {
+    env.storage()
+        .instance()
+        .get(&DataKeyV2::Locked)
+        .unwrap_or(false)
+}
+
+/// Acquire the reentrancy lock. Returns Err if already locked.
+pub fn acquire_lock(env: &Env) -> Result<(), crate::contracterror::Error> {
+    if is_locked(env) {
+        return Err(crate::contracterror::Error::Reentrant);
+    }
+    env.storage().instance().set(&DataKeyV2::Locked, &true);
+    Ok(())
+}
+
+/// Release the reentrancy lock.
+pub fn release_lock(env: &Env) {
+    env.storage().instance().remove(&DataKeyV2::Locked);
 }

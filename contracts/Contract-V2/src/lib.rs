@@ -13,10 +13,10 @@ use contracterror::Error;
 pub use types::{
     AdminTransferredEvent, BatchStreamsCreatedEvent, BeneficiaryTransferredV2Event,
     ClawbackRebalanceEvent, ContractPausedEvent, ContractUnpausedEvent, FeesWithdrawnEvent,
-    MigrationEvent, NebulaEvent, Operation, OperationExecutedEvent, OperationScheduledEvent,
-    PermitArgs, PermitStreamCreatedEvent, StreamArgs, StreamBatchEntry, StreamCancelledV2Event,
-    StreamClaimV2Event, StreamCreatedV2Event, StreamMigratedEvent, StreamRefilledEvent,
-    StreamStatus, StreamToppedUpEvent, StreamV2, StreamRequestInitiatedEvent,
+    MigrationEvent, MultiAssetRecipient, NebulaEvent, Operation, OperationExecutedEvent,
+    OperationScheduledEvent, PermitArgs, PermitStreamCreatedEvent, StreamArgs, StreamBatchEntry,
+    StreamCancelledV2Event, StreamClaimV2Event, StreamCreatedV2Event, StreamMigratedEvent,
+    StreamRefilledEvent, StreamStatus, StreamToppedUpEvent, StreamV2, StreamRequestInitiatedEvent,
     StreamRequestApprovedEvent, StreamRequestExecutedEvent,
 };
 use v1_interface::Client as V1Client;
@@ -2803,6 +2803,143 @@ impl Contract {
         );
 
         Ok(())
+    }
+
+    // ----------------------------------------------------------------
+    // Issue #601 — Multi-Asset Batch Disbursement
+    // Issue #604 — Gas-Efficient Loop Iteration
+    // ----------------------------------------------------------------
+
+    /// Disburse multiple assets to multiple recipients in a single atomic call.
+    ///
+    /// The caller must have pre-approved this contract (via `token.approve`) for
+    /// each distinct asset/amount combination before invoking this function.
+    /// Each `MultiAssetRecipient` row may specify a different asset, so USDC can
+    /// go to some recipients while XLM (or any SAC-compliant token) goes to others.
+    ///
+    /// If a `fee_collector`, `fee_token`, and `fee_per_recipient` are configured
+    /// by the admin, a flat fee of `fee_per_recipient * recipients.len()` is
+    /// transferred from `from` to the `fee_collector` in the `fee_token` before
+    /// the disbursements are executed (Issue #602).
+    ///
+    /// Gas optimizations (Issue #604):
+    /// - Batch cap raised to 100.
+    /// - All storage reads hoisted before the loop.
+    /// - All amounts validated before any transfer (fail-fast, no partial state).
+    /// - When all recipients share the same asset, a single TokenClient is
+    ///   constructed once and reused, avoiding repeated cross-contract client
+    ///   instantiation overhead per iteration.
+    ///
+    /// Panics (via `require_auth`) if the caller has not authorised the transaction.
+    pub fn split_multi_asset(
+        env: Env,
+        from: Address,
+        recipients: Vec<MultiAssetRecipient>,
+    ) -> Result<(), Error> {
+        Self::require_not_paused(&env)?;
+
+        let n = recipients.len();
+        // Issue #604 — cap raised to 100
+        if n == 0 || n > 100 {
+            return Err(Error::BatchTooLarge);
+        }
+
+        from.require_auth();
+
+        // Issue #603 — reentrancy guard
+        storage::acquire_lock(&env)?;
+
+        // Issue #604 — hoist all storage reads before the loop
+        let fee_per_recipient = storage::get_fee_per_recipient(&env);
+        let fee_collector = if fee_per_recipient > 0 {
+            Some(storage::get_fee_collector(&env).ok_or(Error::NoTreasury)?)
+        } else {
+            None
+        };
+        let fee_token_addr = if fee_per_recipient > 0 {
+            Some(storage::get_fee_token(&env).ok_or(Error::NoTreasury)?)
+        } else {
+            None
+        };
+
+        // Issue #604 — validate all amounts before any external call
+        for entry in recipients.iter() {
+            if entry.amount <= 0 {
+                storage::release_lock(&env);
+                return Err(Error::BelowDustThreshold);
+            }
+        }
+
+        // Issue #602 — collect protocol fee
+        if fee_per_recipient > 0 {
+            let total_fee = fee_per_recipient
+                .checked_mul(n as i128)
+                .ok_or(Error::Overflow)?;
+            soroban_sdk::token::TokenClient::new(&env, fee_token_addr.as_ref().unwrap())
+                .transfer(&from, fee_collector.as_ref().unwrap(), &total_fee);
+        }
+
+        // Issue #604 — detect homogeneous batch: if all entries share the same
+        // asset, construct one TokenClient and reuse it across all iterations,
+        // avoiding repeated client instantiation overhead.
+        let first_asset = recipients.get(0).unwrap().asset.clone();
+        let homogeneous = recipients.iter().all(|e| e.asset == first_asset);
+
+        if homogeneous {
+            let token_client = soroban_sdk::token::TokenClient::new(&env, &first_asset);
+            for entry in recipients.iter() {
+                token_client.transfer(&from, &entry.address, &entry.amount);
+            }
+        } else {
+            for entry in recipients.iter() {
+                soroban_sdk::token::TokenClient::new(&env, &entry.asset)
+                    .transfer(&from, &entry.address, &entry.amount);
+            }
+        }
+
+        // Issue #603 — release lock
+        storage::release_lock(&env);
+
+        Ok(())
+    }
+
+    // ----------------------------------------------------------------
+    // Issue #602 — Protocol Fee Capture: admin helpers
+    // ----------------------------------------------------------------
+
+    /// Set the address that collects disbursement fees. Admin-only.
+    pub fn set_fee_collector(env: Env, collector: Address) -> Result<(), Error> {
+        storage::try_get_admin(&env)?.require_auth();
+        storage::set_fee_collector(&env, &collector);
+        Ok(())
+    }
+
+    /// Get the current fee collector address.
+    pub fn get_fee_collector(env: Env) -> Option<Address> {
+        storage::get_fee_collector(&env)
+    }
+
+    /// Set the token used to pay disbursement fees. Admin-only.
+    pub fn set_fee_token(env: Env, token: Address) -> Result<(), Error> {
+        storage::try_get_admin(&env)?.require_auth();
+        storage::set_fee_token(&env, &token);
+        Ok(())
+    }
+
+    /// Set the per-recipient fee amount (in fee_token base units). Admin-only.
+    /// Pass 0 to disable fee collection.
+    pub fn set_fee_per_recipient(env: Env, amount: i128) -> Result<(), Error> {
+        storage::try_get_admin(&env)?.require_auth();
+        if amount < 0 {
+            return Err(Error::BelowDustThreshold);
+        }
+        storage::set_fee_per_recipient(&env, amount);
+        Ok(())
+    }
+
+    /// Get the current per-recipient fee amount.
+    pub fn get_fee_per_recipient(env: Env) -> i128 {
+        storage::get_fee_per_recipient(&env)
     }
 }
 
