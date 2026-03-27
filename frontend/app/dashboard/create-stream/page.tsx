@@ -1000,8 +1000,11 @@ function Step3({
   const displayRate = calcDisplayRate(ratePerSec, form.rateType);
   const endDate = durationSeconds > 0 ? new Date(Date.now() + durationSeconds * 1000) : null;
 
-  const recipientIssues = Object.values(recipientValidation).filter((status) => status !== "ok");
-  const hasRecipientIssues = recipientIssues.length > 0;
+  const claimableRecipients = Object.values(recipientValidation).filter((status) =>
+    status === "missing_trustline" || status === "account_not_funded"
+  );
+  const invalidRecipients = Object.values(recipientValidation).filter((status) => status === "invalid_address");
+  const hasRecipientIssues = invalidRecipients.length > 0;
   const balanceProblem = balanceValidation !== "ok" && balanceValidation !== "pending";
   const confirmDisabled = signing || validationLoading || hasRecipientIssues || balanceProblem;
 
@@ -1076,9 +1079,17 @@ function Step3({
           {validationError}
         </div>
       )}
-      {hasRecipientIssues && (
+      {claimableRecipients.length > 0 && (
         <div className="rounded-2xl border border-yellow-400/20 bg-yellow-400/[0.08] px-4 py-3 text-yellow-100 text-sm">
-          One or more split recipients cannot receive the selected asset. Fix the warning icons in the recipient list before confirming.
+          <p className="font-semibold">{claimableRecipients.length} recipient{claimableRecipients.length !== 1 ? "s" : ""} will need to claim their funds manually.</p>
+          <p className="mt-1 text-[11px] text-yellow-100/80">
+            The contract will create claimable balances for recipients who cannot receive the selected asset directly.
+          </p>
+        </div>
+      )}
+      {hasRecipientIssues && (
+        <div className="rounded-2xl border border-red-400/20 bg-red-400/[0.08] px-4 py-3 text-red-200 text-sm">
+          Some split recipients have an invalid Stellar address and must be corrected before submission.
         </div>
       )}
       {balanceValidation === "insufficient_asset" && (
@@ -1370,7 +1381,16 @@ export default function CreateStreamPage() {
     // totalFeeStroops(0) gives the fee with no simulated resource fee.
     // In production, pass the real simulated resource fee here.
     const feeStoops = totalFeeStroops(0);
-    console.info(`[CreateStream] Submitting with fee: ${feeStoops} stroops (priority: ${priorityTier.id})`);
+    const claimableRecipients = Object.values(recipientValidation).filter((status) =>
+      status === "missing_trustline" || status === "account_not_funded"
+    );
+    const contractAction = claimableRecipients.length > 0 ? "create_claimable_balances" : "split_funds";
+    console.info(
+      `[CreateStream] Submitting with fee: ${feeStoops} stroops (priority: ${priorityTier.id})`,
+    );
+    console.info(
+      `[CreateStream] Using contract action: ${contractAction} for ${claimableRecipients.length} claimable recipient${claimableRecipients.length !== 1 ? "s" : ""}`,
+    );
     setRecoveryError(null);
 
     // Get hardware wallet timeout configuration
