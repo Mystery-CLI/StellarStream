@@ -89,6 +89,7 @@ fn test_packed_stream_metadata_round_trip() {
         split_address: None,
         split_bps: 0,
     };
+    let packed = crate::storage::pack_stream_metadata(&stream);
     let (status, penalty_bps, curve_type, migrated_from_v1, yield_enabled, is_recurrent, cancellation_type) =
         crate::storage::unpack_stream_metadata(packed);
 

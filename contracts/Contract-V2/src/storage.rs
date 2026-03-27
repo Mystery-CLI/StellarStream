@@ -89,6 +89,10 @@ pub enum DataKeyV2 {
     PendingStreamRequest(u64), // 13
     /// Counter for generating unique pending stream request IDs
     StreamRequestCount, // 14
+
+    // -- Compliance Oracle (Issue #412) ---------------------------
+    /// Address of the compliance oracle contract
+    ComplianceOracle, // 15
 }
 
 /// Global stream counter.
@@ -611,4 +615,19 @@ pub fn remove_pending_stream_request(env: &Env, request_id: u64) {
         .instance()
         .remove(&DataKeyV2::PendingStreamRequest(request_id));
     bump_instance(env);
+}
+
+// ----------------------------------------------------------------
+// Compliance Oracle helpers (Issue #412)
+// ----------------------------------------------------------------
+
+/// Set the compliance oracle address. Admin-only enforcement is in lib.rs.
+pub fn set_compliance_oracle(env: &Env, oracle: &Address) {
+    env.storage().instance().set(&DataKeyV2::ComplianceOracle, oracle);
+    bump_instance(env);
+}
+
+/// Return the compliance oracle address, if configured.
+pub fn get_compliance_oracle(env: &Env) -> Option<Address> {
+    env.storage().instance().get(&DataKeyV2::ComplianceOracle)
 }

@@ -380,3 +380,13 @@ pub struct StreamRequestExecutedEvent {
     pub stream_id: u64,
     pub timestamp: u64,
 }
+
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct StreamSplitUpdatedEvent {
+    pub stream_id: u64,
+    pub beneficiary: Address,
+    pub split_address: Option<Address>,
+    pub split_bps: u32,
+    pub timestamp: u64,
+}

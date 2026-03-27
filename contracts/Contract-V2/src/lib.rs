@@ -702,6 +702,36 @@ impl Contract {
     // Stream Operations (Issue #363 — Escalating Rates)
     // ----------------------------------------------------------------
 
+    /// Withdraw unlocked funds from a stream.
+    ///
+    /// # Token Security Assumptions
+    ///
+    /// This function assumes the token implements the Soroban Token Interface
+    /// (SAC-compliant). The following token behaviors are NOT protected against:
+    ///
+    /// - **Malicious tokens**: Tokens that violate the standard interface
+    /// - **Fee-on-transfer tokens**: Tokens that deduct fees during transfer
+    /// - **Rebasing tokens**: Tokens that automatically adjust balances
+    /// - **Transfer restrictions**: Tokens that enforce transfer restrictions
+    ///
+    /// **Only the stream beneficiary can withdraw.** The beneficiary is the
+    /// receiver address set during stream creation, unless changed via
+    /// `transfer_beneficiary()`.
+    ///
+    /// # Parameters
+    /// - `stream_id`: The ID of the stream to withdraw from
+    /// - `beneficiary`: The address receiving the withdrawn funds (must be the stream beneficiary)
+    ///
+    /// # Returns
+    /// - `Ok(amount)`: The amount withdrawn
+    /// - `Err(Error)`: If validation fails or stream is not in withdrawable state
+    ///
+    /// # Errors
+    /// - `ContractPaused`: If the contract is paused
+    /// - `StreamNotFound`: If the stream does not exist
+    /// - `NotBeneficiary`: If the caller is not the stream beneficiary
+    /// - `AlreadyCancelled`: If the stream has been cancelled
+    /// - `NothingToWithdraw`: If no funds are unlocked
     pub fn withdraw(env: Env, stream_id: u64, beneficiary: Address) -> Result<i128, Error> {
         Self::require_not_paused(&env)?;
         beneficiary.require_auth();
@@ -720,27 +750,39 @@ impl Contract {
         Self::require_compliant(&env, &stream.beneficiary)?;
 
         let now = env.ledger().timestamp();
-                    storage::set_stream(&env, stream_id, &stream);
-                    // Return Ok(0) to persist the 'is_pending' state change.
-                    // Returning Err automatically rolls back state in Soroban.
-                    return Ok(0);
-                }
+        let to_withdraw = Self::calculate_unlocked_internal(&stream, now).saturating_sub(stream.withdrawn_amount);
 
-                // Route accrued interest to the designated yield_recipient (Issue #410)
-                let interest = vault_client.get_accrued_interest(&to_withdraw);
-                if interest > 0 {
-                    let interest_dest = match stream.yield_recipient {
-                        0 => stream.sender.clone(),
-                        2 => storage::get_treasury(&env).unwrap_or(stream.sender.clone()),
-                        _ => stream.beneficiary.clone(), // 1 = Receiver (default)
-                    };
-                    let token_client = soroban_sdk::token::TokenClient::new(&env, &stream.token);
-                    token_client.transfer(
-                        &env.current_contract_address(),
-                        &interest_dest,
-                        &interest,
-                    );
-                }
+        if to_withdraw <= 0 {
+            return Err(Error::NothingToWithdraw);
+        }
+
+        // If Yield-Bearing, withdraw principal from Vault
+        if let Some(vault_addr) = &stream.vault_address {
+            let vault_client = VaultClient::new(&env, vault_addr);
+            let result = vault_client.try_withdraw(&to_withdraw);
+            if result.is_err() {
+                // Vault withdrawal failed — mark stream as pending for manual resolution
+                stream.is_pending = true;
+                storage::set_stream(&env, stream_id, &stream);
+                // Return Ok(0) to persist the 'is_pending' state change.
+                // Returning Err automatically rolls back state in Soroban.
+                return Ok(0);
+            }
+
+            // Route accrued interest to the designated yield_recipient (Issue #410)
+            let interest = vault_client.get_accrued_interest(&to_withdraw);
+            if interest > 0 {
+                let interest_dest = match stream.yield_recipient {
+                    0 => stream.sender.clone(),
+                    2 => storage::get_treasury(&env).unwrap_or(stream.sender.clone()),
+                    _ => stream.beneficiary.clone(), // 1 = Receiver (default)
+                };
+                let token_client = soroban_sdk::token::TokenClient::new(&env, &stream.token);
+                token_client.transfer(
+                    &env.current_contract_address(),
+                    &interest_dest,
+                    &interest,
+                );
             }
         }
 
@@ -951,6 +993,35 @@ impl Contract {
         Ok(withdrawal_amount)
     }
 
+    /// Cancel a stream and distribute funds to sender and receiver.
+    ///
+    /// # Token Security Assumptions
+    ///
+    /// This function assumes the token implements the Soroban Token Interface
+    /// (SAC-compliant). The following token behaviors are NOT protected against:
+    ///
+    /// - **Malicious tokens**: Tokens that violate the standard interface
+    /// - **Fee-on-transfer tokens**: Tokens that deduct fees during transfer
+    /// - **Rebasing tokens**: Tokens that automatically adjust balances
+    /// - **Transfer restrictions**: Tokens that enforce transfer restrictions
+    ///
+    /// **Cancellation type determines who can cancel:**
+    /// - Unilateral (type=0): Either sender or receiver can cancel
+    /// - Mutual (type=1): Both sender AND receiver must authorize
+    ///
+    /// # Parameters
+    /// - `stream_id`: The ID of the stream to cancel
+    /// - `caller`: The address initiating the cancellation
+    ///
+    /// # Returns
+    /// - `Ok(())`: If cancellation succeeds
+    /// - `Err(Error)`: If validation fails or caller is not authorized
+    ///
+    /// # Errors
+    /// - `ContractPaused`: If the contract is paused
+    /// - `StreamNotFound`: If the stream does not exist
+    /// - `AlreadyCancelled`: If the stream has already been cancelled
+    /// - `NotStreamOwner`: If the caller is not authorized to cancel
     pub fn cancel(env: Env, stream_id: u64, caller: Address) -> Result<(), Error> {
         Self::require_not_paused(&env)?;
 
@@ -1180,6 +1251,37 @@ impl Contract {
         res
     }
 
+    /// Add additional funds to an existing stream.
+    ///
+    /// # Token Security Assumptions
+    ///
+    /// This function assumes the token implements the Soroban Token Interface
+    /// (SAC-compliant). The following token behaviors are NOT protected against:
+    ///
+    /// - **Malicious tokens**: Tokens that violate the standard interface
+    /// - **Fee-on-transfer tokens**: Tokens that deduct fees during transfer
+    /// - **Rebasing tokens**: Tokens that automatically adjust balances
+    /// - **Transfer restrictions**: Tokens that enforce transfer restrictions
+    ///
+    /// **Only the stream sender can top-up.** The additional funds are
+    /// transferred from the sender to the contract, and the stream's
+    /// `end_time` is extended proportionally to maintain the same rate.
+    ///
+    /// # Parameters
+    /// - `stream_id`: The ID of the stream to top-up
+    /// - `sender`: The address adding funds (must be the stream sender)
+    /// - `extra_amount`: The amount to add (must be > 0)
+    ///
+    /// # Returns
+    /// - `Ok(())`: If top-up succeeds
+    /// - `Err(Error)`: If validation fails or sender is not authorized
+    ///
+    /// # Errors
+    /// - `ContractPaused`: If the contract is paused
+    /// - `StreamNotFound`: If the stream does not exist
+    /// - `NotStreamOwner`: If the caller is not the stream sender
+    /// - `AlreadyCancelled`: If the stream has been cancelled
+    /// - `BelowDustThreshold`: If the extra amount is <= 0
     pub fn top_up(
         env: Env,
         stream_id: u64,
@@ -1364,6 +1466,34 @@ impl Contract {
 
     /// Compare the actual token balance in the contract with the sum of all
     /// active stream remaining balances.
+    ///
+    /// # Token Security Assumptions
+    ///
+    /// This function assumes the token implements the Soroban Token Interface
+    /// (SAC-compliant) and that `balance()` queries return accurate values.
+    ///
+    /// **This function is critical for detecting:**
+    /// - Fee-on-transfer tokens (contract balance < sum of streams)
+    /// - Rebasing tokens (contract balance != sum of streams)
+    /// - Malicious tokens (unexpected balance discrepancies)
+    ///
+    /// **Operators should monitor this regularly** to detect token issues
+    /// before they cause user funds to be stuck.
+    ///
+    /// # Parameters
+    /// - `token`: The token address to check
+    ///
+    /// # Returns
+    /// - `(contract_balance, sum_remaining)`: Tuple of actual contract balance
+    ///   and sum of all active stream remaining balances
+    ///
+    /// # Usage
+    /// ```rust
+    /// let (balance, sum) = client.check_balance_integrity(&token_id);
+    /// if balance < sum {
+    ///     // Token may have fees or rebasing - investigate
+    /// }
+    /// ```
     pub fn check_balance_integrity(env: Env, token: Address) -> (i128, i128) {
         let total_streams = storage::get_health(&env).total_v2_streams;
         let mut sum_remaining: i128 = 0;
@@ -1445,6 +1575,23 @@ impl Contract {
         Ok(())
     }
 
+    /// Verify that an asset is whitelisted for use with the protocol.
+    ///
+    /// # Token Security Assumptions
+    ///
+    /// This is the **primary defense** against malicious tokens. Only whitelisted
+    /// tokens can be used for stream creation, top-ups, and other operations.
+    ///
+    /// **Operators must verify token compatibility before whitelisting.**
+    /// See TOKEN_SECURITY_ASSUMPTIONS.md for detailed security assumptions
+    /// and non-goals.
+    ///
+    /// # Parameters
+    /// - `asset`: The token address to check
+    ///
+    /// # Returns
+    /// - `Ok(())`: If the asset is whitelisted
+    /// - `Err(Error::AssetNotWhitelisted)`: If the asset is not whitelisted
     fn require_asset_whitelisted(env: &Env, asset: &Address) -> Result<(), Error> {
         if !storage::is_asset_whitelisted(env, asset) {
             return Err(Error::AssetNotWhitelisted);
@@ -1467,6 +1614,35 @@ impl Contract {
         Ok(total_amount - fee)
     }
 
+    /// Create a new stream with the specified parameters.
+    ///
+    /// # Token Security Assumptions
+    ///
+    /// This function assumes the token implements the Soroban Token Interface
+    /// (SAC-compliant). The following token behaviors are NOT protected against:
+    ///
+    /// - **Malicious tokens**: Tokens that violate the standard interface
+    /// - **Fee-on-transfer tokens**: Tokens that deduct fees during transfer
+    /// - **Rebasing tokens**: Tokens that automatically adjust balances
+    /// - **Transfer restrictions**: Tokens that enforce transfer restrictions
+    ///
+    /// **Only whitelisted tokens can be used.** Operators must verify token
+    /// compatibility before whitelisting. See TOKEN_SECURITY_ASSUMPTIONS.md
+    /// for detailed security assumptions and non-goals.
+    ///
+    /// # Parameters
+    /// - `args`: Stream creation arguments including sender, receiver, token, amount, and timing
+    ///
+    /// # Returns
+    /// - `Ok(stream_id)`: The ID of the created stream
+    /// - `Err(Error)`: If validation fails or token is not whitelisted
+    ///
+    /// # Errors
+    /// - `ContractPaused`: If the contract is paused
+    /// - `AssetNotWhitelisted`: If the token is not in the whitelist
+    /// - `BelowDustThreshold`: If the amount is below the minimum
+    /// - `InvalidTimeRange`: If timing parameters are invalid
+    /// - `InvalidPenalty`: If penalty basis points exceed 10,000
     pub fn create_stream(env: Env, args: StreamArgs) -> Result<u64, Error> {
         Self::require_not_paused(&env)?;
         args.sender.require_auth();
@@ -2335,3 +2511,5 @@ impl Contract {
 }
 
 mod test;
+mod v1_to_v2_integration_test;
+mod token_security_test;
