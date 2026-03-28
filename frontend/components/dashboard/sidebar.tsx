@@ -16,6 +16,7 @@ import {
   History as HistoryIcon,
   Shield,
   ShieldAlert,
+  ShieldCheck,
   Menu,
   X,
   Share2,
@@ -87,6 +88,11 @@ export function Sidebar({ onOpenAuditLog }: SidebarProps) {
       label: "Splitter",
       href: "/dashboard/splitter",
       icon: Share2,
+    },
+    {
+      label: "Transparency",
+      href: "/dashboard/transparency",
+      icon: ShieldCheck,
     },
     {
       label: "History",
